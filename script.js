@@ -1,6 +1,39 @@
-// ===== 計算用関数 =====
+/****************************************************
+ * 有給時のみ Enterキーで次の入力欄へ移動する関数
+ ****************************************************/
+function attachPaidLeaveEnterNavigation() {
+  const form = document.getElementById('timeCardForm');
+  // 有給時に使用する入力欄だけを対象
+  const selector = '#paidLeaveYear, #dateMulti, #checkIn, #checkOut';
+  // 表示されている要素だけを取得
+  const inputs = Array.from(form.querySelectorAll(selector))
+    .filter(el => el.offsetParent !== null);
 
-// 出勤・退勤の差を時間単位で計算（小数点2桁）
+  inputs.forEach((input, index) => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === "Enter" || e.keyCode === 13) {
+        // 必須チェック
+        if (!input.checkValidity()) {
+          input.reportValidity();
+          return;
+        }
+        e.preventDefault();
+        const nextEl = inputs[index + 1];
+        if (nextEl) {
+          // 次の要素に移動
+          nextEl.focus();
+        } else {
+          // 最後なら送信
+          form.dispatchEvent(new Event("submit", { cancelable: true }));
+        }
+      }
+    });
+  });
+}
+
+/***********************************************
+ * 計算・ユーティリティ関数
+ ***********************************************/
 function calculateTimeDifference(startTime, endTime) {
   const start = new Date(`1970-01-01T${startTime}`);
   const end = new Date(`1970-01-01T${endTime}`);
@@ -8,7 +41,6 @@ function calculateTimeDifference(startTime, endTime) {
   return parseFloat(diff.toFixed(2));
 }
 
-// 早朝勤務時間を計算（08:30まで）
 function calculateEarlyMorningTime(startTime, endTime) {
   const endLimit = new Date('1970-01-01T08:30');
   const start = new Date(`1970-01-01T${startTime}`);
@@ -21,7 +53,6 @@ function calculateEarlyMorningTime(startTime, endTime) {
   return 0;
 }
 
-// 夕方勤務時間を計算（16:00以降）
 function calculateEveningTime(startTime, endTime) {
   const startLimit = new Date('1970-01-01T16:00');
   const start = new Date(`1970-01-01T${startTime}`);
@@ -34,9 +65,20 @@ function calculateEveningTime(startTime, endTime) {
   return 0;
 }
 
-// ===== イベントリスナー =====
+// "YYYY-MM-DD" 形式の日付から "MM-DD" だけを返す
+function formatDate(dateString) {
+  const parts = dateString.split('-');
+  if (parts.length === 3) {
+    return `${parts[1]}-${parts[2]}`;
+  }
+  return dateString;
+}
 
-// 有給として登録するチェックボックスにチェックしたとき、パスワード入力を要求（正解:4564）
+/***********************************************
+ * イベントリスナー
+ ***********************************************/
+
+// 有給チェック切り替え
 document.getElementById('isPaidLeave').addEventListener('change', function() {
   if (this.checked) {
     const pwd = prompt("有給として登録するためのパスワードを入力してください:");
@@ -45,15 +87,17 @@ document.getElementById('isPaidLeave').addEventListener('change', function() {
       this.checked = false;
       return;
     }
-    // パスワード正解の場合、有給用の入力欄を表示
+    // 有給用の入力欄を表示
     document.getElementById('normalDateGroup').classList.add('hidden');
     document.getElementById('paidLeaveYearGroup').classList.remove('hidden');
     document.getElementById('multiDateGroup').classList.remove('hidden');
     document.getElementById('dateSingle').required = false;
     document.getElementById('paidLeaveYear').required = true;
     document.getElementById('dateMulti').required = true;
+    // 有給時だけEnterキーで次へ移動
+    attachPaidLeaveEnterNavigation();
   } else {
-    // チェックが外れた場合、通常勤務用の入力欄を表示
+    // 通常勤務
     document.getElementById('normalDateGroup').classList.remove('hidden');
     document.getElementById('paidLeaveYearGroup').classList.add('hidden');
     document.getElementById('multiDateGroup').classList.add('hidden');
@@ -63,11 +107,13 @@ document.getElementById('isPaidLeave').addEventListener('change', function() {
   }
 });
 
+// フォーム送信（通常勤務は標準挙動）
 document.getElementById('timeCardForm').addEventListener('submit', function(e) {
   e.preventDefault();
   saveTimeCard();
 });
 
+// エクスポートなどボタン
 document.getElementById('exportBtn').addEventListener('click', exportToExcel);
 document.getElementById('clearDataBtn').addEventListener('click', requestPasswordAndClearData);
 document.getElementById('backupBtn').addEventListener('click', backupData);
@@ -78,21 +124,23 @@ document.getElementById('restoreBtn').addEventListener('click', () => {
 document.getElementById('restoreFile').addEventListener('change', e => {
   restoreData(e.target.files[0]);
 });
+
+// 検索機能
 document.getElementById('searchName').addEventListener('input', displayTimeCards);
 
-// ===== 保存・表示・削除関数 =====
+// ページ読み込み時
+document.addEventListener('DOMContentLoaded', displayTimeCards);
 
+/***********************************************
+ * saveTimeCard, displayTimeCards, deleteTimeCard
+ ***********************************************/
 function saveTimeCard() {
-  const nameField = document.getElementById('name');
-  const name = nameField.value.trim();
+  const name = document.getElementById('name').value.trim();
   const isPaidLeave = document.getElementById('isPaidLeave').checked;
-  let finalDates = [];
-
   if (!name) {
     alert('名前を入力してください。');
     return;
   }
-
   const checkIn = document.getElementById('checkIn').value;
   const checkOut = document.getElementById('checkOut').value;
   if (!checkIn || !checkOut) {
@@ -100,9 +148,12 @@ function saveTimeCard() {
     return;
   }
 
+  // 日付の取得
+  let finalDates = [];
   if (isPaidLeave) {
+    // 有給
     const paidLeaveYear = document.getElementById('paidLeaveYear').value.trim();
-    const dateMulti = document.getElementById('dateMulti').value.trim();
+    let dateMulti = document.getElementById('dateMulti').value.trim();
     if (!paidLeaveYear) {
       alert('有給用の西暦を入力してください。');
       return;
@@ -111,15 +162,18 @@ function saveTimeCard() {
       alert('月日を入力してください。');
       return;
     }
+    // 4桁の場合 "0212" → "02-12" に変換
     const splitted = dateMulti.split(',')
       .map(s => s.trim())
-      .filter(s => s !== '');
+      .filter(s => s !== '')
+      .map(s => (s.length===4 && s.indexOf('-')===-1) ? s.slice(0,2) + '-' + s.slice(2) : s);
     if (splitted.length === 0) {
       alert('月日を入力してください。');
       return;
     }
     finalDates = splitted.map(md => `${paidLeaveYear}-${md}`);
   } else {
+    // 通常勤務
     const dateSingle = document.getElementById('dateSingle').value;
     if (!dateSingle) {
       alert('月日を入力してください。');
@@ -128,12 +182,8 @@ function saveTimeCard() {
     finalDates = [dateSingle];
   }
 
-  const timeCardData = {
-    checkIn: checkIn,
-    checkOut: checkOut,
-    isPaidLeave: isPaidLeave
-  };
-
+  // ローカルストレージ保存
+  const timeCardData = { checkIn, checkOut, isPaidLeave };
   let allTimeCards = JSON.parse(localStorage.getItem('timeCards')) || {};
   if (!allTimeCards[name]) {
     allTimeCards[name] = {};
@@ -146,18 +196,15 @@ function saveTimeCard() {
   });
   localStorage.setItem('timeCards', JSON.stringify(allTimeCards));
 
-  // 入力欄のリセット
+  // 送信後のリセット
   if (isPaidLeave) {
-    // 有給の場合は、名前と有給用西暦は残す
+    // 有給：名前と有給用西暦以外をクリア
     document.getElementById('checkIn').value = "";
     document.getElementById('checkOut').value = "";
     document.getElementById('dateMulti').value = "";
   } else {
-    // 通常勤務の場合は全てクリア
+    // 通常：フォーム全体を初期化
     document.getElementById('timeCardForm').reset();
-  }
-  // 有給チェックはそのまま（有給の場合）; 通常勤務の場合はリセット
-  if (!isPaidLeave) {
     document.getElementById('isPaidLeave').checked = false;
     document.getElementById('normalDateGroup').classList.remove('hidden');
     document.getElementById('paidLeaveYearGroup').classList.add('hidden');
@@ -166,25 +213,18 @@ function saveTimeCard() {
     document.getElementById('paidLeaveYear').required = false;
     document.getElementById('dateMulti').required = false;
   }
+
   displayTimeCards();
 }
 
-// "YYYY-MM-DD" 形式の日付から "MM-DD" 部分だけを返す
-function formatDate(dateString) {
-  const parts = dateString.split('-');
-  if (parts.length === 3) {
-    return `${parts[1]}-${parts[2]}`;
-  }
-  return dateString;
-}
-
-// ローカルストレージのデータを画面に表示
 function displayTimeCards() {
   const searchName = document.getElementById('searchName').value.trim().toLowerCase();
   const allTimeCards = JSON.parse(localStorage.getItem('timeCards')) || {};
   const resultDiv = document.getElementById('result');
   resultDiv.innerHTML = '<h2>勤怠一覧</h2>';
+
   for (let name in allTimeCards) {
+    // 検索フィルタ（名前部分一致）
     if (searchName && !name.toLowerCase().includes(searchName)) continue;
     resultDiv.innerHTML += `<h3>${name}</h3>`;
     const sortedDates = Object.keys(allTimeCards[name]).sort();
@@ -192,7 +232,7 @@ function displayTimeCards() {
       resultDiv.innerHTML += `<h4>${formatDate(date)}</h4>`;
       if (Array.isArray(allTimeCards[name][date])) {
         allTimeCards[name][date].forEach((card, index) => {
-          if (card && card.checkIn && card.checkOut) {
+          if (card.checkIn && card.checkOut) {
             const paidLabel = card.isPaidLeave ? '<span style="color: blue;">【有給】</span>' : '';
             resultDiv.innerHTML += `
               <div>
@@ -224,6 +264,9 @@ function deleteTimeCard(name, date, index) {
   displayTimeCards();
 }
 
+/****************************************************
+ * パスワードを入力して全データ削除
+ ****************************************************/
 function requestPasswordAndClearData() {
   const password = prompt('パスワードを入力してください:');
   if (password === '4564' && confirm('本当にすべてのデータをクリアしますか？')) {
@@ -234,13 +277,9 @@ function requestPasswordAndClearData() {
   }
 }
 
-// ===== Excelエクスポート =====
-// 各名前ごとにシートを作成し、日付順に全レコードを出力。
-// 各行の「合計時間」は出勤から退勤までの時間、
-// 「朝夕勤務」は早朝勤務時間＋夕方勤務時間の合計、
-// 「通常合計」は「合計時間」から「朝夕勤務」を引いた値として出力。
-// 最終行は全勤務合計を「合計」として出力し、
-// 勤務種別は有給の場合のみ「有給」と表示（通常は空欄）
+/****************************************************
+ * Excelエクスポート
+ ****************************************************/
 function exportToExcel() {
   const allTimeCards = JSON.parse(localStorage.getItem('timeCards')) || {};
   const workbook = XLSX.utils.book_new();
@@ -248,8 +287,7 @@ function exportToExcel() {
   for (let name in allTimeCards) {
     const sheetData = [];
     sheetData.push([`名前: ${name}`]);
-    // ヘッダー行：4列目を「合計時間」、5列目を「朝夕勤務」、6列目を「通常合計」とする
-    sheetData.push(["日付", "出勤時間", "退勤時間", "合計時間", "朝夕勤務", "通常合計", "勤務種別"]);
+    sheetData.push(["日付","出勤時間","退勤時間","合計時間","朝夕勤務","通常合計","勤務種別"]);
 
     let overallTotalDay = 0,
         overallTotalMorningEvening = 0,
@@ -258,18 +296,17 @@ function exportToExcel() {
     const sortedDates = Object.keys(allTimeCards[name]).sort();
     sortedDates.forEach(date => {
       allTimeCards[name][date].forEach(card => {
+        if (!card.checkIn || !card.checkOut) return;
         const totalHours = parseFloat(calculateTimeDifference(card.checkIn, card.checkOut));
-        const earlyMorning = parseFloat(calculateEarlyMorningTime(card.checkIn, card.checkOut));
-        const evening = parseFloat(calculateEveningTime(card.checkIn, card.checkOut));
-        // 「朝夕勤務」は早朝＋夕方勤務の合計
-        const morningEvening = earlyMorning + evening;
-        // 「通常合計」は総合計から朝夕勤務を引いたもの
+        const early = parseFloat(calculateEarlyMorningTime(card.checkIn, card.checkOut));
+        const eve = parseFloat(calculateEveningTime(card.checkIn, card.checkOut));
+        const morningEvening = early + eve;
         const normalHours = totalHours - morningEvening;
-
+        
         overallTotalDay += totalHours;
         overallTotalMorningEvening += morningEvening;
         overallTotalNormal += normalHours;
-
+        
         sheetData.push([
           formatDate(date),
           card.checkIn,
@@ -282,13 +319,9 @@ function exportToExcel() {
       });
     });
 
-    // 最終行：全勤務合計を「合計」として出力
     sheetData.push([]);
     sheetData.push([
-      "合計",
-      "",
-      "",
-      overallTotalDay.toFixed(2),
+      "合計","","",overallTotalDay.toFixed(2),
       overallTotalMorningEvening.toFixed(2),
       overallTotalNormal.toFixed(2),
       ""
@@ -306,8 +339,9 @@ function exportToExcel() {
   XLSX.writeFile(workbook, "timecards.xlsx");
 }
 
-// ===== バックアップ・リストア =====
-
+/****************************************************
+ * バックアップ・リストア
+ ****************************************************/
 function backupData() {
   const allTimeCards = JSON.parse(localStorage.getItem('timeCards')) || {};
   const dataStr = JSON.stringify(allTimeCards);
@@ -328,9 +362,10 @@ function getLatestMonthPeriod() {
   const startMonth = (today.getDate() >= 11) ? currentMonth : (currentMonth === 0 ? 11 : currentMonth - 1);
   const endYear = (startMonth === 11) ? startYear + 1 : startYear;
   const endMonth = (startMonth + 1) % 12;
-  const start = new Date(startYear, startMonth, 11);
-  const end = new Date(endYear, endMonth, 10);
-  return { start, end };
+  return {
+    start: new Date(startYear, startMonth, 11),
+    end: new Date(endYear, endMonth, 10)
+  };
 }
 
 function backupLatestMonthData() {
@@ -339,9 +374,11 @@ function backupLatestMonthData() {
   const latestMonthData = {};
   for (let name in allTimeCards) {
     for (let date in allTimeCards[name]) {
-      const recordDate = new Date(date);
-      if (recordDate >= latestMonthPeriod.start && recordDate <= latestMonthPeriod.end) {
-        if (!latestMonthData[name]) latestMonthData[name] = {};
+      const d = new Date(date);
+      if (d >= latestMonthPeriod.start && d <= latestMonthPeriod.end) {
+        if (!latestMonthData[name]) {
+          latestMonthData[name] = {};
+        }
         latestMonthData[name][date] = allTimeCards[name][date];
       }
     }
@@ -377,9 +414,6 @@ function restoreData(file) {
   };
   reader.readAsText(file);
 }
-
-document.addEventListener('DOMContentLoaded', displayTimeCards);
-
 
 
 
